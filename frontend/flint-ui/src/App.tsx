@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 
 const API = "http://localhost:8000"
 
+// ---------------- TYPES ----------------
 type Labels = {
   gender?: "M" | "F"
   beard?: "zero" | "light" | "medium" | "heavy"
@@ -9,90 +10,228 @@ type Labels = {
   speaker?: number
 }
 
-function App() {
-  const [totalFrames, setTotalFrames] = useState<number>(0)
-  const [currentFrame, setCurrentFrame] = useState<number>(1)
-  const [frameLabels, setFrameLabels] = useState<Record<number, Labels>>({})
-  const currentLabels = frameLabels[currentFrame] || {}
+// ---------------- UTILS ----------------
+function getLabelsForFrame(
+  frame: number,
+  keyframes: Record<number, Labels>
+): Labels {
+  const frames = Object.keys(keyframes)
+    .map(Number)
+    .filter(f => f <= frame)
+    .sort((a, b) => b - a)
 
-  // Fetch video metadata
+  return frames.length ? keyframes[frames[0]] : {}
+}
+
+// ---------------- APP ----------------
+export default function App() {
+  const [videoId, setVideoId] = useState<string | null>(null)
+  const [totalFrames, setTotalFrames] = useState(0)
+  const [currentFrame, setCurrentFrame] = useState(1)
+
+  const [keyframes, setKeyframes] = useState<Record<number, Labels>>({})
+
+  const [zoom, setZoom] = useState(1)
+  const [isUploading, setIsUploading] = useState(false)
+
+  // ---------------- VIDEO UPLOAD ----------------
+  async function handleUpload(file: File) {
+    setIsUploading(true)
+
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const res = await fetch(`${API}/upload-video`, {
+      method: "POST",
+      body: formData,
+    })
+
+    const data = await res.json()
+
+    setVideoId(data.video_id)
+    setTotalFrames(data.total_frames)
+    setCurrentFrame(1)
+    setKeyframes({})
+    setIsUploading(false)
+  }
+
+  // ---------------- LOAD ANNOTATIONS ----------------
   useEffect(() => {
-    fetch(`${API}/video/frames`)
+    if (!videoId) return
+
+    fetch(`${API}/video/${videoId}/annotations`)
       .then(res => res.json())
       .then(data => {
-        setTotalFrames(data.total_frames)
+        if (data.keyframes) setKeyframes(data.keyframes)
       })
-      .catch(err => {
-        console.error("Failed to fetch video metadata", err)
+  }, [videoId])
+
+  // ---------------- AUTOSAVE ----------------
+  useEffect(() => {
+    if (!videoId) return
+
+    const id = setInterval(() => {
+      fetch(`${API}/video/${videoId}/annotations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyframes }),
       })
-  }, [])
+    }, 2000)
 
-  const frameUrl = `${API}/video/frame/${currentFrame}`
+    return () => clearInterval(id)
+  }, [keyframes, videoId])
 
+  // ---------------- PRE-UPLOAD ----------------
+  if (!videoId) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "flex",
+          justifyContent: "center",
+          paddingTop: 60,
+          fontFamily: "Inter, Arial, sans-serif",
+        }}
+      >
+        <div style={{ width: 600, textAlign: "center" }}>
+          {/* LOGO / TITLE */}
+          <div style={{ marginBottom: 40 }}>
+            <h1 style={{ margin: 0, fontSize: 44, letterSpacing: 1 }}>
+              FLINT
+            </h1>
+            <p style={{ margin: "6px 0", opacity: 0.7 }}>
+              Frame Level Intelligent Tagging
+            </p>
+            <p style={{ margin: 0, fontSize: 13, opacity: 0.6 }}>
+              A ProjectKarna Tool
+            </p>
+          </div>
+
+          <input
+            type="file"
+            accept="video/*"
+            onChange={e => {
+              if (e.target.files?.[0]) {
+                handleUpload(e.target.files[0])
+              }
+            }}
+          />
+
+          {isUploading && <p style={{ marginTop: 10 }}>Extracting frames…</p>}
+        </div>
+      </div>
+    )
+  }
+
+  // ---------------- DERIVED ----------------
+  const currentLabels = getLabelsForFrame(currentFrame, keyframes)
+  const frameUrl = `${API}/video/${videoId}/frame/${currentFrame}`
+
+  // ---------------- UI ----------------
   return (
-    <div style={{ padding: 20, fontFamily: "Arial, sans-serif" }}>
-      <h2>FLINT – Frame Level Annotation (MVP)</h2>
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        paddingTop: 30,
+        fontFamily: "Inter, Arial, sans-serif",
+      }}
+    >
+      <div style={{ width: 720 }}>
+        {/* HEADER */}
+        <div style={{ textAlign: "center", marginBottom: 20 }}>
+          <h1 style={{ margin: 0, letterSpacing: 1 }}>FLINT</h1>
+          <div style={{ fontSize: 13, opacity: 0.7 }}>
+            Frame Level Intelligent Tagging · ProjectKarna
+          </div>
+        </div>
 
-      {/* Frame Viewer */}
-      <div>
-        <img
-          src={frameUrl}
-          width={480}
-          style={{ border: "1px solid #ccc", background: "#eee" }}
-          alt={`Frame ${currentFrame}`}
-        />
-      </div>
-
-      {/* Navigation */}
-      <div style={{ marginTop: 10 }}>
-        <button onClick={() => setCurrentFrame(f => Math.max(1, f - 1))}>
-          ◀ Prev
-        </button>
-
-        <button
-          style={{ marginLeft: 5 }}
-          onClick={() => setCurrentFrame(f => Math.min(totalFrames, f + 1))}
+        {/* FRAME VIEWER */}
+        <div
+          style={{
+            width: 640,
+            height: 360,
+            margin: "0 auto",
+            border: "1px solid #999",
+            background: "#000",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+          }}
         >
-          Next ▶
-        </button>
+          <img
+            src={frameUrl}
+            alt={`Frame ${currentFrame}`}
+            style={{
+              maxWidth: "100%",
+              maxHeight: "100%",
+              transform: `scale(${zoom})`,
+              transformOrigin: "center",
+              objectFit: "contain",
+            }}
+          />
+        </div>
 
-        <button
-          style={{ marginLeft: 10 }}
-          onClick={() => setCurrentFrame(f => Math.max(1, f - 10))}
-        >
-          -10
-        </button>
+        {/* ZOOM */}
+        <div style={{ textAlign: "center", marginTop: 8 }}>
+          <button onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}>−</button>
+          <span style={{ margin: "0 10px" }}>{zoom.toFixed(1)}x</span>
+          <button onClick={() => setZoom(z => Math.min(2.5, z + 0.1))}>+</button>
+        </div>
 
-        <button
-          style={{ marginLeft: 5 }}
-          onClick={() => setCurrentFrame(f => Math.min(totalFrames, f + 10))}
-        >
-          +10
-        </button>
-      </div>
+        {/* NAV */}
+        <div style={{ textAlign: "center", marginTop: 10 }}>
+          <button
+            style={{ marginLeft: 10 }}
+            disabled={currentFrame <= 10}
+            onClick={() => setCurrentFrame(f => f - 10)}
+          >
+            -10
+          </button>
+          <button disabled={currentFrame === 1} onClick={() => setCurrentFrame(f => f - 1)}>
+            ◀ Prev
+          </button>
+          <button
+            style={{ marginLeft: 5 }}
+            disabled={currentFrame === totalFrames}
+            onClick={() => setCurrentFrame(f => f + 1)}
+          >
+            Next ▶
+          </button>
+          <button
+            style={{ marginLeft: 5 }}
+            disabled={currentFrame + 10 > totalFrames}
+            onClick={() => setCurrentFrame(f => f + 10)}
+          >
+            +10
+          </button>
+        </div>
 
-      <p style={{ marginTop: 5 }}>
-        Frame <b>{currentFrame}</b> / {totalFrames}
-      </p>
+        <p style={{ textAlign: "center" }}>
+          Frame <b>{currentFrame}</b> / {totalFrames}
+          {keyframes[currentFrame] && (
+            <span style={{ color: "green", marginLeft: 10 }}>● Keyframe</span>
+          )}
+        </p>
 
-      <hr />
+        <hr />
 
-      {/* Label Panel */}
-      <div>
-        <h4>Labels (local only – Day 1)</h4>
+        {/* LABELS */}
+        <h4>Labels</h4>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <select
             value={currentLabels.gender ?? ""}
             onChange={e =>
-              setFrameLabels(prev => ({
+              setKeyframes(prev => ({
                 ...prev,
                 [currentFrame]: {
-                  ...prev[currentFrame],
+                  ...getLabelsForFrame(currentFrame, prev),
                   gender: e.target.value as Labels["gender"],
                 },
               }))
-
             }
           >
             <option value="">Gender</option>
@@ -103,14 +242,13 @@ function App() {
           <select
             value={currentLabels.beard ?? ""}
             onChange={e =>
-              setFrameLabels(prev => ({
+              setKeyframes(prev => ({
                 ...prev,
                 [currentFrame]: {
-                  ...prev[currentFrame],
+                  ...getLabelsForFrame(currentFrame, prev),
                   beard: e.target.value as Labels["beard"],
                 },
               }))
-
             }
           >
             <option value="">Beard</option>
@@ -123,14 +261,14 @@ function App() {
           <select
             value={currentLabels.occlusion ?? ""}
             onChange={e =>
-              setFrameLabels(prev => ({
-              ...prev,
-              [currentFrame]: {
-                ...prev[currentFrame],
-                occlusion: e.target.value as Labels["occlusion"],
-              },
-            }))
-          }
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  occlusion: e.target.value as Labels["occlusion"],
+                },
+              }))
+            }
           >
             <option value="">Occlusion</option>
             <option value="none">None</option>
@@ -142,11 +280,14 @@ function App() {
             placeholder="Speaker"
             value={currentLabels.speaker ?? ""}
             onChange={e =>
-              setFrameLabels(prev => ({
+              setKeyframes(prev => ({
                 ...prev,
                 [currentFrame]: {
-                  ...prev[currentFrame],
-                  speaker: e.target.value === "" ? undefined : Number(e.target.value),
+                  ...getLabelsForFrame(currentFrame, prev),
+                  speaker:
+                    e.target.value === ""
+                      ? undefined
+                      : Number(e.target.value),
                 },
               }))
             }
@@ -154,19 +295,21 @@ function App() {
           />
         </div>
 
-        <pre
-          style={{
-            marginTop: 15,
-            background: "#171616",
-            padding: 10,
-            fontSize: 12,
-          }}
-        >
-          {JSON.stringify(frameLabels[currentFrame] || {}, null, 2)}
-        </pre>
+        {keyframes[currentFrame] && (
+          <button
+            style={{ marginTop: 10 }}
+            onClick={() =>
+              setKeyframes(prev => {
+                const copy = { ...prev }
+                delete copy[currentFrame]
+                return copy
+              })
+            }
+          >
+            Remove Keyframe
+          </button>
+        )}
       </div>
     </div>
   )
 }
-
-export default App
