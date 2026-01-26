@@ -27,6 +27,7 @@ app.add_middleware(
 DATA_DIR = "data"
 FRAMES_DIR = os.path.join(DATA_DIR, "frames")
 os.makedirs(FRAMES_DIR, exist_ok=True)
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 # ---------------- DB DEP ----------------
 def get_db():
