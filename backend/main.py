@@ -8,7 +8,7 @@ import shutil
 import cv2
 import json
 
-from database import SessionLocal
+from backend.database import SessionLocal
 from models import Video, Annotation
 
 # ---------------- APP ----------------
