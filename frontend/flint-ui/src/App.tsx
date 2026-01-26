@@ -8,6 +8,7 @@ type Labels = {
   beard?: "zero" | "light" | "medium" | "heavy"
   occlusion?: "none" | "hand"
   speaker?: number
+  rejected?: boolean
 }
 
 // ---------------- UTILS ----------------
@@ -20,7 +21,12 @@ function getLabelsForFrame(
     .filter(f => f <= frame)
     .sort((a, b) => b - a)
 
-  return frames.length ? keyframes[frames[0]] : {}
+  for (const f of frames) {
+    const labels = keyframes[f]
+    if (labels?.rejected) return {}
+    return { ...labels }
+  }
+  return {}
 }
 
 // ---------------- APP ----------------
@@ -28,9 +34,7 @@ export default function App() {
   const [videoId, setVideoId] = useState<string | null>(null)
   const [totalFrames, setTotalFrames] = useState(0)
   const [currentFrame, setCurrentFrame] = useState(1)
-
   const [keyframes, setKeyframes] = useState<Record<number, Labels>>({})
-
   const [zoom, setZoom] = useState(1)
   const [isUploading, setIsUploading] = useState(false)
 
@@ -52,8 +56,49 @@ export default function App() {
     setTotalFrames(data.total_frames)
     setCurrentFrame(1)
     setKeyframes({})
+    setZoom(1)
     setIsUploading(false)
+
+    localStorage.setItem(
+      "flint_video",
+      JSON.stringify({
+        videoId: data.video_id,
+        totalFrames: data.total_frames,
+      })
+    )
   }
+
+  // ---------------- EXPORT ----------------
+  function exportAnnotations() {
+    if (!videoId) return
+
+    const payload = {
+      videoId,
+      totalFrames,
+      keyframes,
+    }
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    })
+
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `flint_${videoId}_annotations.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // ---------------- LOAD SAVED VIDEO ----------------
+  useEffect(() => {
+    const saved = localStorage.getItem("flint_video")
+    if (!saved) return
+    const { videoId, totalFrames } = JSON.parse(saved)
+    setVideoId(videoId)
+    setTotalFrames(totalFrames)
+    setCurrentFrame(1)
+  }, [])
 
   // ---------------- LOAD ANNOTATIONS ----------------
   useEffect(() => {
@@ -62,7 +107,12 @@ export default function App() {
     fetch(`${API}/video/${videoId}/annotations`)
       .then(res => res.json())
       .then(data => {
-        if (data.keyframes) setKeyframes(data.keyframes)
+        if (!data.keyframes) return
+        const normalized: Record<number, Labels> = {}
+        Object.entries(data.keyframes).forEach(([k, v]) => {
+          normalized[Number(k)] = v as Labels
+        })
+        setKeyframes(normalized)
       })
   }, [videoId])
 
@@ -70,18 +120,38 @@ export default function App() {
   useEffect(() => {
     if (!videoId) return
 
-    const id = setInterval(() => {
+    const id = setTimeout(() => {
       fetch(`${API}/video/${videoId}/annotations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyframes }),
       })
-    }, 2000)
+    }, 600)
 
-    return () => clearInterval(id)
+    return () => clearTimeout(id)
   }, [keyframes, videoId])
 
-  // ---------------- PRE-UPLOAD ----------------
+  // ---------------- DERIVED ----------------
+  const currentLabels = getLabelsForFrame(currentFrame, keyframes)
+  const frameUrl = `${API}/video/${videoId}/frame/${currentFrame}`
+  const isRejected = !!keyframes[currentFrame]?.rejected
+
+  // ---------------- UPLOAD INPUT ----------------
+  const uploadInput = (
+    <input
+      id="video-upload"
+      type="file"
+      accept="video/*"
+      style={{ display: "none" }}
+      onChange={e => {
+        const file = e.target.files?.[0]
+        if (file) handleUpload(file)
+        e.target.value = ""
+      }}
+    />
+  )
+
+  // ---------------- PRE-UPLOAD UI ----------------
   if (!videoId) {
     return (
       <div
@@ -89,33 +159,19 @@ export default function App() {
           minHeight: "100vh",
           display: "flex",
           justifyContent: "center",
-          paddingTop: 60,
+          alignItems: "center",
           fontFamily: "Inter, Arial, sans-serif",
         }}
       >
-        <div style={{ width: 600, textAlign: "center" }}>
-          {/* LOGO / TITLE */}
-          <div style={{ marginBottom: 40 }}>
-            <h1 style={{ margin: 0, fontSize: 44, letterSpacing: 1 }}>
-              FLINT
-            </h1>
-            <p style={{ margin: "6px 0", opacity: 0.7 }}>
-              Frame Level Intelligent Tagging
-            </p>
-            <p style={{ margin: 0, fontSize: 13, opacity: 0.6 }}>
-              A ProjectKarna Tool
-            </p>
-          </div>
+        {uploadInput}
+        <div style={{ textAlign: "center", width: 520 }}>
+          <h1 style={{ fontSize: 44, marginBottom: 6 }}>FLINT</h1>
+          <p style={{ opacity: 0.7 }}>Frame Level Intelligent Tagging</p>
+          <p style={{ fontSize: 13, opacity: 0.6 }}>A ProjectKarna Tool</p>
 
-          <input
-            type="file"
-            accept="video/*"
-            onChange={e => {
-              if (e.target.files?.[0]) {
-                handleUpload(e.target.files[0])
-              }
-            }}
-          />
+          <button onClick={() => document.getElementById("video-upload")?.click()}>
+            Upload Video
+          </button>
 
           {isUploading && <p style={{ marginTop: 10 }}>Extracting frames…</p>}
         </div>
@@ -123,29 +179,55 @@ export default function App() {
     )
   }
 
-  // ---------------- DERIVED ----------------
-  const currentLabels = getLabelsForFrame(currentFrame, keyframes)
-  const frameUrl = `${API}/video/${videoId}/frame/${currentFrame}`
-
-  // ---------------- UI ----------------
+  // ---------------- MAIN UI ----------------
   return (
     <div
       style={{
         minHeight: "100vh",
         display: "flex",
         justifyContent: "center",
-        paddingTop: 30,
+        paddingTop: 20,
         fontFamily: "Inter, Arial, sans-serif",
+        borderBottom: "1px solid rgba(255,255,255,0.1)",
+        paddingBottom: 12,
       }}
     >
-      <div style={{ width: 720 }}>
-        {/* HEADER */}
-        <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <h1 style={{ margin: 0, letterSpacing: 1 }}>FLINT</h1>
-          <div style={{ fontSize: 13, opacity: 0.7 }}>
-            Frame Level Intelligent Tagging · ProjectKarna
+      {uploadInput}
+
+      <div style={{ width: 760 }}>
+        {/* HEADER BAR */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 20,
+            }}
+          >
+            {/* LEFT: LOGO / TITLE */}
+            <div>
+              <h1 style={{ margin: 0, fontSize: 28 }}>FLINT</h1>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                Frame Level Intelligent Tagging · ProjectKarna
+              </div>
+            </div>
+
+            {/* RIGHT: ACTIONS */}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() =>
+                  document.getElementById("video-upload")?.click()
+                }
+              >
+                Upload New Video
+              </button>
+
+              <button onClick={exportAnnotations}>
+                Export Keyframes
+              </button>
+            </div>
           </div>
-        </div>
+
 
         {/* FRAME VIEWER */}
         <div
@@ -153,12 +235,14 @@ export default function App() {
             width: 640,
             height: 360,
             margin: "0 auto",
-            border: "1px solid #999",
             background: "#000",
+            border: "1px solid #888",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             overflow: "hidden",
+            borderBottom: "1px solid rgba(255,255,255,0.1)",
+            paddingBottom: 12,
           }}
         >
           <img
@@ -168,7 +252,6 @@ export default function App() {
               maxWidth: "100%",
               maxHeight: "100%",
               transform: `scale(${zoom})`,
-              transformOrigin: "center",
               objectFit: "contain",
             }}
           />
@@ -177,34 +260,25 @@ export default function App() {
         {/* ZOOM */}
         <div style={{ textAlign: "center", marginTop: 8 }}>
           <button onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}>−</button>
-          <span style={{ margin: "0 10px" }}>{zoom.toFixed(1)}x</span>
+          <span style={{ margin: "0 12px" }}>{zoom.toFixed(1)}x</span>
           <button onClick={() => setZoom(z => Math.min(2.5, z + 0.1))}>+</button>
+          {isRejected && (
+            <span style={{ color: "red", marginLeft: 12 }}>✖ Rejected</span>
+          )}
         </div>
 
         {/* NAV */}
         <div style={{ textAlign: "center", marginTop: 10 }}>
-          <button
-            style={{ marginLeft: 10 }}
-            disabled={currentFrame <= 10}
-            onClick={() => setCurrentFrame(f => f - 10)}
-          >
+          <button disabled={currentFrame <= 10} onClick={() => setCurrentFrame(f => f - 10)}>
             -10
           </button>
           <button disabled={currentFrame === 1} onClick={() => setCurrentFrame(f => f - 1)}>
             ◀ Prev
           </button>
-          <button
-            style={{ marginLeft: 5 }}
-            disabled={currentFrame === totalFrames}
-            onClick={() => setCurrentFrame(f => f + 1)}
-          >
+          <button disabled={currentFrame === totalFrames} onClick={() => setCurrentFrame(f => f + 1)}>
             Next ▶
           </button>
-          <button
-            style={{ marginLeft: 5 }}
-            disabled={currentFrame + 10 > totalFrames}
-            onClick={() => setCurrentFrame(f => f + 10)}
-          >
+          <button disabled={currentFrame + 10 > totalFrames} onClick={() => setCurrentFrame(f => f + 10)}>
             +10
           </button>
         </div>
@@ -220,7 +294,6 @@ export default function App() {
 
         {/* LABELS */}
         <h4>Labels</h4>
-
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <select
             value={currentLabels.gender ?? ""}
@@ -278,7 +351,8 @@ export default function App() {
           <input
             type="number"
             placeholder="Speaker"
-            value={currentLabels.speaker ?? ""}
+            value={currentLabels.speaker ?? "1"}
+            style={{ width: 90 }}
             onChange={e =>
               setKeyframes(prev => ({
                 ...prev,
@@ -291,24 +365,27 @@ export default function App() {
                 },
               }))
             }
-            style={{ width: 80 }}
           />
         </div>
 
-        {keyframes[currentFrame] && (
-          <button
-            style={{ marginTop: 10 }}
-            onClick={() =>
-              setKeyframes(prev => {
-                const copy = { ...prev }
-                delete copy[currentFrame]
-                return copy
-              })
-            }
-          >
-            Remove Keyframe
-          </button>
-        )}
+        {/* REJECT */}
+        <div style={{ marginTop: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={isRejected}
+              onChange={e =>
+                setKeyframes(prev => ({
+                  ...prev,
+                  [currentFrame]: e.target.checked
+                    ? { rejected: true }
+                    : {},
+                }))
+              }
+            />
+            Reject this frame (poor quality / unusable)
+          </label>
+        </div>
       </div>
     </div>
   )

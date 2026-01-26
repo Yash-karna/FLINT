@@ -1,130 +1,127 @@
-from fastapi import FastAPI, Body, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pathlib import Path
-import json
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 import uuid
-import subprocess
+import os
+import shutil
+import cv2
+import json
 
+from database import SessionLocal
+from models import Video, Annotation
+
+# ---------------- APP ----------------
 app = FastAPI()
 
-# ✅ CORS FIX
+# ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # React dev server
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-FRAMES_DIR = Path("frames/demo_video")
+# ---------------- CONFIG ----------------
+DATA_DIR = "data"
+FRAMES_DIR = os.path.join(DATA_DIR, "frames")
+os.makedirs(FRAMES_DIR, exist_ok=True)
 
-DATA_DIR = Path("data")
-DATA_DIR.mkdir(exist_ok=True)
+# ---------------- DB DEP ----------------
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-UPLOAD_DIR = Path("uploads")
-FRAMES_DIR = Path("frames")
+# ---------------- HELPERS ----------------
+def extract_frames(video_path: str, out_dir: str) -> int:
+    cap = cv2.VideoCapture(video_path)
+    count = 0
 
-UPLOAD_DIR.mkdir(exist_ok=True)
-FRAMES_DIR.mkdir(exist_ok=True)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        count += 1
+        cv2.imwrite(os.path.join(out_dir, f"{count}.jpg"), frame)
+
+    cap.release()
+    return count
+
+# ---------------- ROUTES ----------------
 
 @app.post("/upload-video")
-async def upload_video(file: UploadFile = File(...)):
-    video_id = str(uuid.uuid4())[:8]
-    video_path = UPLOAD_DIR / f"{video_id}.mp4"
-    frame_dir = FRAMES_DIR / video_id
+def upload_video(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    video_id = str(uuid.uuid4())
+    video_dir = os.path.join(FRAMES_DIR, video_id)
+    os.makedirs(video_dir, exist_ok=True)
 
-    frame_dir.mkdir(parents=True, exist_ok=True)
+    video_path = os.path.join(video_dir, file.filename)
+    with open(video_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
 
-    # Save video
-    with open(video_path, "wb") as f:
-        f.write(await file.read())
+    total_frames = extract_frames(video_path, video_dir)
 
-    # Extract frames using ffmpeg
-    subprocess.run([
-        "ffmpeg",
-        "-i", str(video_path),
-        str(frame_dir / "frame_%06d.jpg")
-    ], check=True)
+    # Save DB records
+    video = Video(
+        id=video_id,
+        total_frames=total_frames
+    )
+    db.add(video)
 
-    total_frames = len(list(frame_dir.glob("*.jpg")))
+    annotation = Annotation(
+        video_id=video_id,
+        keyframes={}
+    )
+    db.add(annotation)
+
+    db.commit()
 
     return {
         "video_id": video_id,
         "total_frames": total_frames
     }
 
-@app.get("/video/{video_id}/frames")
-def get_video_meta(video_id: str):
-    frame_dir = FRAMES_DIR / video_id
-    frames = sorted(frame_dir.glob("*.jpg"))
-    return {
-        "video_id": video_id,
-        "total_frames": len(frames)
-    }
+# ---------------- FRAME SERVING ----------------
 
-@app.get("/video/{video_id}/frame/{frame_no}")
-def get_frame(video_id: str, frame_no: int):
-    frame_path = FRAMES_DIR / video_id / f"frame_{frame_no:06d}.jpg"
-    if not frame_path.exists():
-        return {"error": "Frame not found"}
+@app.get("/video/{video_id}/frame/{frame}")
+def get_frame(video_id: str, frame: int):
+    frame_path = os.path.join(FRAMES_DIR, video_id, f"{frame}.jpg")
+    if not os.path.exists(frame_path):
+        raise HTTPException(status_code=404, detail="Frame not found")
+
     return FileResponse(frame_path)
 
-def data_file(video_id: str):
-    return DATA_DIR / f"{video_id}.json"
+# ---------------- ANNOTATIONS ----------------
 
 @app.get("/video/{video_id}/annotations")
-def load_annotations(video_id: str):
-    file = data_file(video_id)
-    if not file.exists():
-        return {"keyframes": {}}
-
-    with open(file) as f:
-        return json.load(f)
+def get_annotations(video_id: str, db: Session = Depends(get_db)):
+    ann = db.query(Annotation).filter_by(video_id=video_id).first()
+    return {"keyframes": ann.keyframes if ann else {}}
 
 @app.post("/video/{video_id}/annotations")
-def save_annotations(video_id: str, payload: dict = Body(...)):
-    file = data_file(video_id)
-    with open(file, "w") as f:
-        json.dump(payload, f)
+def save_annotations(
+    video_id: str,
+    payload: dict,
+    db: Session = Depends(get_db)
+):
+    ann = db.query(Annotation).filter_by(video_id=video_id).first()
+    if not ann:
+        raise HTTPException(status_code=404, detail="Annotation not found")
+
+    ann.keyframes = payload.get("keyframes", {})
+    db.commit()
 
     return {"status": "saved"}
 
-@app.post("/video/{video_id}/lock")
-def lock_video(video_id: str, user: str):
-    file = data_file(video_id)
+# ---------------- HEALTH ----------------
 
-    if file.exists():
-        with open(file) as f:
-            data = json.load(f)
-            if data.get("locked_by") and data["locked_by"] != user:
-                return {"locked": False, "by": data["locked_by"]}
-
-    data = {
-        "video_id": video_id,
-        "locked_by": user,
-        "keyframes": {}
-    }
-    with open(file, "w") as f:
-        json.dump(data, f)
-
-    return {"locked": True}
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-@app.get("/video/frames")
-def get_video_meta():
-    frames = sorted(FRAMES_DIR.glob("*.jpg"))
-    return {
-        "total_frames": len(frames),
-        "video_id": "demo_video"
-    }
-
-@app.get("/video/frame/{frame_no}")
-def get_frame(frame_no: int):
-    frame_path = FRAMES_DIR / f"frame_{frame_no:06d}.jpg"
-    if not frame_path.exists():
-        return {"error": "Frame not found"}
-    return FileResponse(frame_path)
+@app.get("/")
+def root():
+    return {"status": "FLINT backend running"}
