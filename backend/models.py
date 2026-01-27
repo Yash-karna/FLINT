@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, JSON, DateTime
 from sqlalchemy.sql import func
-from backend.database import Base
+from database import Base
 
 class Video(Base):
     __tablename__ = "videos"
