@@ -49,6 +49,9 @@ export default function App() {
       method: "POST",
       body: formData,
     })
+    if (!res.ok) {
+      throw new Error("Upload failed")
+}
 
     const data = await res.json()
 
