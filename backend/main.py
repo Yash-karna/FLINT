@@ -8,11 +8,13 @@ import shutil
 import cv2
 import json
 
-from backend.database import SessionLocal
+from backend.database import SessionLocal,Base,engine
 from backend.models import Video, Annotation
 
 # ---------------- APP ----------------
 app = FastAPI()
+
+Base.metadata.create_all(bind=engine)
 
 # ---------------- CORS ----------------
 app.add_middleware(
