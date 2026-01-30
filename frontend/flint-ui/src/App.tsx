@@ -37,6 +37,8 @@ export default function App() {
   const [keyframes, setKeyframes] = useState<Record<number, Labels>>({})
   const [zoom, setZoom] = useState(1)
   const [isUploading, setIsUploading] = useState(false)
+  const [annotationStatus, setAnnotationStatus] = useState<"in_progress" | "review" | "final">("in_progress")
+
 
   // ---------------- VIDEO UPLOAD ----------------
   async function handleUpload(file: File) {
@@ -110,18 +112,37 @@ export default function App() {
     fetch(`${API}/video/${videoId}/annotations`)
       .then(res => res.json())
       .then(data => {
+        setAnnotationStatus(data.status ?? "in_progress")
+
         if (!data.keyframes) return
+
         const normalized: Record<number, Labels> = {}
         Object.entries(data.keyframes).forEach(([k, v]) => {
           normalized[Number(k)] = v as Labels
         })
         setKeyframes(normalized)
       })
-  }, [videoId])
+  },[videoId])
+  
+  // ---------------- DERIVED ----------------
+  const currentLabels = getLabelsForFrame(currentFrame, keyframes)
+  const frameUrl = `${API}/video/${videoId}/frame/${currentFrame}`
+  const isRejected = !!keyframes[currentFrame]?.rejected
+  const locked = annotationStatus === "final"
+
+  const keyframeFrames = Object.keys(keyframes)
+    .map(Number)
+    .sort((a, b) => a - b)
+
+  const prevKeyframe = [...keyframeFrames]
+    .reverse()
+    .find(f => f < currentFrame)
+
+  const nextKeyframe = keyframeFrames.find(f => f > currentFrame)
 
   // ---------------- AUTOSAVE ----------------
   useEffect(() => {
-    if (!videoId) return
+    if (!videoId || locked) return
 
     const id = setTimeout(() => {
       fetch(`${API}/video/${videoId}/annotations`, {
@@ -132,13 +153,9 @@ export default function App() {
     }, 600)
 
     return () => clearTimeout(id)
-  }, [keyframes, videoId])
+  }, [keyframes, videoId, locked])
 
-  // ---------------- DERIVED ----------------
-  const currentLabels = getLabelsForFrame(currentFrame, keyframes)
-  const frameUrl = `${API}/video/${videoId}/frame/${currentFrame}`
-  const isRejected = !!keyframes[currentFrame]?.rejected
-
+  
   // ---------------- UPLOAD INPUT ----------------
   const uploadInput = (
     <input
@@ -216,12 +233,30 @@ export default function App() {
             </div>
 
             {/* RIGHT: ACTIONS */}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() =>
-                  document.getElementById("video-upload")?.click()
-                }
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <select
+                value={annotationStatus}
+                onChange={e => {
+                  const status = e.target.value as
+                    | "in_progress"
+                    | "review"
+                    | "final"
+
+                  setAnnotationStatus(status)
+
+                  fetch(`${API}/video/${videoId}/annotations/status`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status }),
+                  })
+                }}
               >
+                <option value="in_progress">In Progress</option>
+                <option value="review">Review</option>
+                <option value="final">Final (Lock)</option>
+              </select>
+
+              <button onClick={() => document.getElementById("video-upload")?.click()}>
                 Upload New Video
               </button>
 
@@ -230,6 +265,7 @@ export default function App() {
               </button>
             </div>
           </div>
+
 
 
         {/* FRAME VIEWER */}
@@ -272,19 +308,54 @@ export default function App() {
 
         {/* NAV */}
         <div style={{ textAlign: "center", marginTop: 10 }}>
-          <button disabled={currentFrame <= 10} onClick={() => setCurrentFrame(f => f - 10)}>
+          <button
+            disabled={prevKeyframe === undefined}
+            onClick={() => prevKeyframe && setCurrentFrame(prevKeyframe)}
+          >
+            ⏮ Prev Keyframe
+          </button>
+
+          <button
+            disabled={currentFrame <= 10}
+            onClick={() => setCurrentFrame(f => f - 10)}
+          >
             -10
           </button>
-          <button disabled={currentFrame === 1} onClick={() => setCurrentFrame(f => f - 1)}>
+
+          <button
+            disabled={currentFrame === 1}
+            onClick={() => setCurrentFrame(f => f - 1)}
+          >
             ◀ Prev
           </button>
-          <button disabled={currentFrame === totalFrames} onClick={() => setCurrentFrame(f => f + 1)}>
+
+          <button
+            disabled={currentFrame === totalFrames}
+            onClick={() => setCurrentFrame(f => f + 1)}
+          >
             Next ▶
           </button>
-          <button disabled={currentFrame + 10 > totalFrames} onClick={() => setCurrentFrame(f => f + 10)}>
+
+          <button
+            disabled={currentFrame + 10 > totalFrames}
+            onClick={() => setCurrentFrame(f => f + 10)}
+          >
             +10
           </button>
+
+          <button
+            disabled={nextKeyframe === undefined}
+            onClick={() => nextKeyframe && setCurrentFrame(nextKeyframe)}
+          >
+            Next Keyframe ⏭
+          </button>
         </div>
+
+        {locked && (
+          <p style={{ color: "red", textAlign: "center", marginTop: 8 }}>
+            🔒 Annotations are finalized and read-only
+          </p>
+        )}
 
         <p style={{ textAlign: "center" }}>
           Frame <b>{currentFrame}</b> / {totalFrames}
@@ -293,12 +364,68 @@ export default function App() {
           )}
         </p>
 
+        <div style={{ textAlign: "center", marginBottom: 8 }}>
+          <input
+            type="number"
+            min={1}
+            max={totalFrames}
+            placeholder="Jump to frame"
+            style={{ width: 140 }}
+            onKeyDown={e => {
+              if (e.key === "Enter") {
+                const value = Number((e.target as HTMLInputElement).value)
+                if (value >= 1 && value <= totalFrames) {
+                  setCurrentFrame(value)
+                }
+              }
+            }}
+          />
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            justifyContent: "center",
+            flexWrap: "wrap",
+            marginTop: 6,
+            fontSize: 11,
+          }}
+        >
+          {keyframeFrames.map((f) => {
+            const isRejectedFrame = !!keyframes[f]?.rejected
+
+            return (
+              <span
+                key={f}
+                onClick={() => setCurrentFrame(f)}
+                style={{
+                  cursor: "pointer",
+                  padding: "2px 6px",
+                  borderRadius: 4,
+                  background: isRejectedFrame
+                    ? "#b71c1c"
+                    : f === currentFrame
+                    ? "#4caf50"
+                    : f < currentFrame
+                    ? "#777"
+                    : "#333"
+                }}
+              >
+                {f}
+              </span>
+            )
+          })}
+
+        </div>
+            
         <hr />
 
         {/* LABELS */}
         <h4>Labels</h4>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <select
+            disabled = {locked}
             value={currentLabels.gender ?? ""}
             onChange={e =>
               setKeyframes(prev => ({
@@ -316,6 +443,7 @@ export default function App() {
           </select>
 
           <select
+            disabled = {locked}
             value={currentLabels.beard ?? ""}
             onChange={e =>
               setKeyframes(prev => ({
@@ -335,6 +463,7 @@ export default function App() {
           </select>
 
           <select
+            disabled = {locked}
             value={currentLabels.occlusion ?? ""}
             onChange={e =>
               setKeyframes(prev => ({
@@ -354,7 +483,7 @@ export default function App() {
           <input
             type="number"
             placeholder="Speaker"
-            value={currentLabels.speaker ?? "1"}
+            value={currentLabels.speaker ?? "0"}
             style={{ width: 90 }}
             onChange={e =>
               setKeyframes(prev => ({

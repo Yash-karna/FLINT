@@ -10,6 +10,7 @@ import json
 
 from database import SessionLocal,Base,engine
 from models import Video, Annotation
+from schemas import AnnotationPayload
 
 # ---------------- APP ----------------
 app = FastAPI()
@@ -106,22 +107,51 @@ def get_frame(video_id: str, frame: int):
 @app.get("/video/{video_id}/annotations")
 def get_annotations(video_id: str, db: Session = Depends(get_db)):
     ann = db.query(Annotation).filter_by(video_id=video_id).first()
-    return {"keyframes": ann.keyframes if ann else {}}
+    if not ann:
+        return {"keyframes": {}, "status": "in_progress"}
+
+    return {
+        "keyframes": ann.keyframes,
+        "status": ann.status,
+    }
 
 @app.post("/video/{video_id}/annotations")
 def save_annotations(
     video_id: str,
-    payload: dict,
+    payload: AnnotationPayload,
     db: Session = Depends(get_db)
 ):
     ann = db.query(Annotation).filter_by(video_id=video_id).first()
     if not ann:
         raise HTTPException(status_code=404, detail="Annotation not found")
 
-    ann.keyframes = payload.get("keyframes", {})
+    if ann.keyframes is None:
+        ann.keyframes = {}
+
+    # MERGE keyframes instead of overwriting
+    for frame, labels in payload.keyframes.items():
+        ann.keyframes[frame] = labels
+
+    db.commit()
+    return {"status": "saved"}
+
+@app.post("/video/{video_id}/annotations/status")
+def update_annotation_status(
+    video_id: str,
+    status: str,
+    db: Session = Depends(get_db)
+):
+    if status not in {"in_progress", "review", "final"}:
+        raise HTTPException(400, "Invalid status")
+
+    ann = db.query(Annotation).filter_by(video_id=video_id).first()
+    if not ann:
+        raise HTTPException(404, "Annotation not found")
+
+    ann.status = status
     db.commit()
 
-    return {"status": "saved"}
+    return {"status": ann.status}
 
 # ---------------- HEALTH ----------------
 
