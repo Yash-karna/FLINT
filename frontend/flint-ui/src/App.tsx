@@ -23,9 +23,12 @@ function getLabelsForFrame(
 
   for (const f of frames) {
     const labels = keyframes[f]
-    if (labels?.rejected) return {}
+    if(!labels) continue
+
+    if (labels?.rejected) continue
     return { ...labels }
   }
+  
   return {}
 }
 
