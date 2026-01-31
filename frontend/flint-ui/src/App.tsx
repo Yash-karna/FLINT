@@ -4,9 +4,24 @@ const API = import.meta.env.VITE_API_URL
 
 // ---------------- TYPES ----------------
 type Labels = {
-  gender?: "M" | "F"
-  beard?: "zero" | "light" | "medium" | "heavy"
-  occlusion?: "none" | "hand"
+  gender?: string
+  ethnicity?: string
+  age?: string
+  skin_tone?: string
+
+  beard?: string
+  occlusion?: string
+  face_lighting?: string
+  camera_angle?: string
+  network_artifact?: string
+
+  lip_jitter?: string
+  eye_blink_rate?: string
+  head_motion_lag?: string
+  phoneme_alignment?: string
+  jaw_motion_alignment?: string
+
+  audio_origin?: string
   speaker?: number
   rejected?: boolean
 }
@@ -362,7 +377,7 @@ export default function App() {
 
         <p style={{ textAlign: "center" }}>
           Frame <b>{currentFrame}</b> / {totalFrames}
-          {keyframes[currentFrame] && (
+          {keyframes[currentFrame] && (!isRejected) && (
             <span style={{ color: "green", marginLeft: 10 }}>● Keyframe</span>
           )}
         </p>
@@ -428,7 +443,7 @@ export default function App() {
         <h4>Labels</h4>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <select
-            disabled = {locked}
+            disabled = {locked || isRejected}
             value={currentLabels.gender ?? ""}
             onChange={e =>
               setKeyframes(prev => ({
@@ -446,7 +461,75 @@ export default function App() {
           </select>
 
           <select
-            disabled = {locked}
+            disabled = {locked || isRejected}
+            value={currentLabels.ethnicity ?? ""}
+            onChange={e =>
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  ethnicity: e.target.value || undefined,
+                },
+              }))
+            }
+          >
+            <option value="">Ethnicity</option>
+            <option value="asian">Asian</option>
+            <option value="south_asian">South Asian</option>
+            <option value="east_asian">East Asian</option>
+            <option value="black">Black</option>
+            <option value="white">White</option>
+            <option value="middle_eastern">Middle Eastern</option>
+            <option value="latino">Latino</option>
+            <option value="other">Other</option>
+          </select>
+
+          <select
+            disabled = {locked || isRejected}
+            value={currentLabels.age ?? ""}
+            onChange={e =>
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  age: e.target.value || undefined,
+                },
+              }))
+            }
+          >
+            <option value="">Age</option>
+            <option value="child">Child</option>
+            <option value="teen">Teen</option>
+            <option value="young_adult">Young Adult</option>
+            <option value="adult">Adult</option>
+            <option value="middle_aged">Middle Aged</option>
+            <option value="senior">Senior</option>
+          </select>
+
+          <select
+            disabled = {locked || isRejected}
+            value={currentLabels.skin_tone ?? ""}
+            onChange={e =>
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  skin_tone: e.target.value || undefined,
+                },
+              }))
+            }
+          >
+            <option value="">Skin Tone</option>
+            <option value="very_light">Very Light</option>
+            <option value="light">Light</option>
+            <option value="medium">Medium</option>
+            <option value="olive">Olive</option>
+            <option value="brown">Brown</option>
+            <option value="dark">Dark</option>
+          </select>
+
+          <select
+            disabled = {locked || isRejected}
             value={currentLabels.beard ?? ""}
             onChange={e =>
               setKeyframes(prev => ({
@@ -466,7 +549,7 @@ export default function App() {
           </select>
 
           <select
-            disabled = {locked}
+            disabled = {locked || isRejected}
             value={currentLabels.occlusion ?? ""}
             onChange={e =>
               setKeyframes(prev => ({
@@ -484,6 +567,7 @@ export default function App() {
           </select>
 
           <input
+            disabled = {locked || isRejected}
             type="number"
             placeholder="Speaker"
             value={currentLabels.speaker ?? "0"}

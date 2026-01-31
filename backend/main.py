@@ -125,14 +125,27 @@ def save_annotations(
     if not ann:
         raise HTTPException(status_code=404, detail="Annotation not found")
 
-    if ann.keyframes is None:
-        ann.keyframes = {}
+    existing = ann.keyframes or {}
 
-    # MERGE keyframes instead of overwriting
-    for frame, labels in payload.keyframes.items():
-        ann.keyframes[frame] = labels
+    for frame, incoming in payload.keyframes.items():
+        frame = str(frame)
 
+        # Rejection wipes everything else
+        if incoming.rejected is True:
+            existing[frame] = {"rejected": True}
+            continue
+
+        if frame not in existing or existing[frame].get("rejected"):
+            existing[frame] = {}
+
+        for k, v in incoming.dict(exclude_unset=True).items():
+            if k == "rejected" and v is False:
+                continue
+            existing[frame][k] = v
+
+    ann.keyframes = existing
     db.commit()
+
     return {"status": "saved"}
 
 @app.post("/video/{video_id}/annotations/status")
