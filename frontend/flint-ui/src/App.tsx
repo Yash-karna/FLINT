@@ -26,6 +26,11 @@ type Labels = {
   rejected?: boolean
 }
 
+type VideoMetadata = {
+  polarity?: "real" | "fake"
+  generation_tool?: string
+  architecture?: string
+}
 // ---------------- UTILS ----------------
 function getLabelsForFrame(
   frame: number,
@@ -56,7 +61,7 @@ export default function App() {
   const [zoom, setZoom] = useState(1)
   const [isUploading, setIsUploading] = useState(false)
   const [annotationStatus, setAnnotationStatus] = useState<"in_progress" | "review" | "final">("in_progress")
-
+  const [metadata, setMetadata] = useState<VideoMetadata>({})
 
   // ---------------- VIDEO UPLOAD ----------------
   async function handleUpload(file: File) {
@@ -98,6 +103,7 @@ export default function App() {
     const payload = {
       videoId,
       totalFrames,
+      metadata,
       keyframes,
     }
 
@@ -130,17 +136,33 @@ export default function App() {
     fetch(`${API}/video/${videoId}/annotations`)
       .then(res => res.json())
       .then(data => {
-        setAnnotationStatus(data.status ?? "in_progress")
-
-        if (!data.keyframes) return
-
-        const normalized: Record<number, Labels> = {}
-        Object.entries(data.keyframes).forEach(([k, v]) => {
-          normalized[Number(k)] = v as Labels
-        })
-        setKeyframes(normalized)
+        if (data.keyframes) {
+          const normalized: Record<number, Labels> = {}
+          Object.entries(data.keyframes).forEach(([k, v]) => {
+            normalized[Number(k)] = v as Labels
+          })
+          setKeyframes(normalized)
+        }
+        if (data.metadata) {
+          setMetadata(data.metadata)
+        }
       })
-  },[videoId])
+  }, [videoId])
+
+  useEffect(() => {
+    if (!videoId) return
+
+    const id = setTimeout(() => {
+      fetch(`${API}/video/${videoId}/annotations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata }),
+      })
+    }, 600)
+
+    return () => clearTimeout(id)
+  }, [metadata, videoId])
+
   
   // ---------------- DERIVED ----------------
   const currentLabels = getLabelsForFrame(currentFrame, keyframes)
@@ -284,6 +306,45 @@ export default function App() {
             </div>
           </div>
 
+      <h4>Video Metadata</h4>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <select
+          value={metadata.polarity ?? ""}
+          onChange={e =>
+            setMetadata(m => ({ ...m, polarity: e.target.value as any }))
+          }
+        >
+          <option value="">Polarity</option>
+          <option value="real">Real</option>
+          <option value="fake">Fake</option>
+        </select>
+
+        <select
+          value={metadata.generation_tool ?? ""}
+          onChange={e =>
+            setMetadata(m => ({ ...m, generation_tool: e.target.value }))
+          }
+        >
+          <option value="">Generation Tool</option>
+          <option value="deepfacelab">DeepFaceLab</option>
+          <option value="faceswap">FaceSwap</option>
+          <option value="veo">Veo</option>
+          <option value="other">Other</option>
+        </select>
+
+        <select
+          value={metadata.architecture ?? ""}
+          onChange={e =>
+            setMetadata(m => ({ ...m, architecture: e.target.value }))
+          }
+        >
+          <option value="">Architecture</option>
+          <option value="gan">GAN</option>
+          <option value="diffusion">Diffusion</option>
+          <option value="neural_rendering">Neural Rendering</option>
+          <option value="unknown">Unknown</option>
+        </select>
+      </div>
 
 
         {/* FRAME VIEWER */}

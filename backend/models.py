@@ -17,4 +17,5 @@ class Annotation(Base):
     video_id = Column(String, index=True)
     keyframes = Column(JSON, nullable=False)
     status = Column(String, default="in_progress", nullable=False)
+    meta = Column(JSON, nullable=False, default=dict)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

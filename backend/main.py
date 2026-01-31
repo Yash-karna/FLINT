@@ -108,11 +108,11 @@ def get_frame(video_id: str, frame: int):
 def get_annotations(video_id: str, db: Session = Depends(get_db)):
     ann = db.query(Annotation).filter_by(video_id=video_id).first()
     if not ann:
-        return {"keyframes": {}, "status": "in_progress"}
+        return {"keyframes": {}, "metadata": {}}
 
     return {
         "keyframes": ann.keyframes,
-        "status": ann.status,
+        "metadata": ann.metadata or {}
     }
 
 @app.post("/video/{video_id}/annotations")
@@ -125,27 +125,35 @@ def save_annotations(
     if not ann:
         raise HTTPException(status_code=404, detail="Annotation not found")
 
-    existing = ann.keyframes or {}
+    # ---- KEYFRAMES (existing logic) ----
+    if payload.keyframes:
+        existing = ann.keyframes or {}
 
-    for frame, incoming in payload.keyframes.items():
-        frame = str(frame)
+        for frame, incoming in payload.keyframes.items():
+            frame = str(frame)
 
-        # Rejection wipes everything else
-        if incoming.rejected is True:
-            existing[frame] = {"rejected": True}
-            continue
-
-        if frame not in existing or existing[frame].get("rejected"):
-            existing[frame] = {}
-
-        for k, v in incoming.dict(exclude_unset=True).items():
-            if k == "rejected" and v is False:
+            if incoming.rejected is True:
+                existing[frame] = {"rejected": True}
                 continue
-            existing[frame][k] = v
 
-    ann.keyframes = existing
+            if frame not in existing or existing[frame].get("rejected"):
+                existing[frame] = {}
+
+            for k, v in incoming.dict(exclude_unset=True).items():
+                if k == "rejected" and v is False:
+                    continue
+                existing[frame][k] = v
+
+        ann.keyframes = existing
+
+    # ---- METADATA (NEW) ----
+    if payload.metadata:
+        ann.metadata = {
+            **(ann.metadata or {}),
+            **payload.metadata.dict(exclude_unset=True)
+        }
+
     db.commit()
-
     return {"status": "saved"}
 
 @app.post("/video/{video_id}/annotations/status")

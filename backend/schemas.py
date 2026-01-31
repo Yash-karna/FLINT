@@ -30,5 +30,12 @@ class LabelSchema(BaseModel):
     rejected: Optional[bool] = None
 
 
+class VideoMetadataSchema(BaseModel):
+    polarity: Optional[str] = None        # real | fake
+    generation_tool: Optional[str] = None
+    architecture: Optional[str] = None
+
+
 class AnnotationPayload(BaseModel):
-    keyframes: Dict[int, LabelSchema]
+    keyframes: Optional[Dict[int, LabelSchema]] = None
+    meta: Optional[VideoMetadataSchema] = None
