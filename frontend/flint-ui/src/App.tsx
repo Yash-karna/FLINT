@@ -440,7 +440,7 @@ export default function App() {
         <hr />
 
         {/* LABELS */}
-        <h4>Labels</h4>
+        <h5 style={{ marginBottom : 6, marginTop: 10, opacity: 0.8, fontWeight: 500}}>Identity</h5>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <select
             disabled = {locked || isRejected}
@@ -527,7 +527,9 @@ export default function App() {
             <option value="brown">Brown</option>
             <option value="dark">Dark</option>
           </select>
-
+        </div>
+        <h5 style={{ marginBottom : 6, marginTop: 10, opacity: 0.8, fontWeight: 500}}>Visual</h5>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <select
             disabled = {locked || isRejected}
             value={currentLabels.beard ?? ""}
@@ -564,6 +566,54 @@ export default function App() {
             <option value="">Occlusion</option>
             <option value="none">None</option>
             <option value="hand">Hand</option>
+            <option value="glasses">Glasses</option>
+            <option value="mic">Mic</option>
+            <option value="headphone">Headphone</option>
+            <option value="cap">Cap</option>
+          </select>
+          
+          <select
+            disabled = {locked || isRejected}
+            value={currentLabels.face_lighting ?? ""}
+            onChange={e =>
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  face_lighting: e.target.value as Labels["face_lighting"],
+                },
+              }))
+            }
+          >
+            <option value="">Face Lighting</option>
+            <option value="well-lit">Well-lit</option>
+            <option value="front-lit">Front-lit</option>
+            <option value="back-lit">Back-lit</option>
+            <option value="uneven">Uneven</option>
+            <option value="dim">Dim</option>
+            <option value="over-exposed">Over exposed</option>
+            <option value="very-dim">Very Dim</option>
+          </select>
+          
+          <select
+            disabled = {locked || isRejected}
+            value={currentLabels.camera_angle ?? ""}
+            onChange={e =>
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  camera_angle: e.target.value as Labels["camera_angle"],
+                },
+              }))
+            }
+          >
+            <option value="">Camera Angle</option>
+            <option value="front">Front facing</option>
+            <option value="slight-turn">Slight Turn</option>
+            <option value="side">Side View</option>
+            <option value="upwards">Upwards</option>
+            <option value="downwards">Downwards</option>
           </select>
 
           <input
@@ -586,7 +636,65 @@ export default function App() {
             }
           />
         </div>
+      
+      <h5 style={{ marginBottom: 6, marginTop: 14, opacity: 0.8, fontWeight: 500 }}>Audio</h5>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <select
+            disabled = {locked || isRejected}
+            value={currentLabels.phoneme_alignment ?? ""}
+            onChange={e =>
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  phoneme_alignment: e.target.value as Labels["phoneme_alignment"],
+                },
+              }))
+            }
+          >
+            <option value="">Phoneme Allignment</option>
+            <option value="in-sync">In-Sync</option>
+            <option value="severe-mismatch">Severe Mismatch</option>
+            <option value="slight-mismatch">Slight Mismatch</option>
+          </select>
+          
+          <select
+            disabled = {locked || isRejected}
+            value={currentLabels.jaw_motion_alignment ?? ""}
+            onChange={e =>
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  jaw_motion_alignment: e.target.value as Labels["jaw_motion_alignment"],
+                },
+              }))
+            }
+          >
+            <option value="">Jaw Motion Allignment</option>
+            <option value="in-sync">In-Sync</option>
+            <option value="severe-mismatch">Severe Mismatch</option>
+            <option value="slight-mismatch">Slight Mismatch</option>
+          </select>
 
+          <select
+            disabled = {locked || isRejected}
+            value={currentLabels.audio_origin ?? ""}
+            onChange={e =>
+              setKeyframes(prev => ({
+                ...prev,
+                [currentFrame]: {
+                  ...getLabelsForFrame(currentFrame, prev),
+                  audio_origin: e.target.value as Labels["audio_origin"],
+                },
+              }))
+            }
+          >
+            <option value="">Audio Origin</option>
+            <option value="real">Real</option>
+            <option value="synthetic">Synthetic</option>
+          </select>
+      </div>
         {/* REJECT */}
         <div style={{ marginTop: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
