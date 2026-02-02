@@ -1,55 +1,18 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
+import type { Labels } from "./types/labels"
+import { getLabelsForFrame } from "./utils/labelInheritance"
+import { validateAnnotation } from "./utils/validateAnnotation"
 
 const API = import.meta.env.VITE_API_URL
 
+console.log("API:", import.meta.env.VITE_API_URL)
+
 // ---------------- TYPES ----------------
-type Labels = {
-  gender?: string
-  ethnicity?: string
-  age?: string
-  skin_tone?: string
 
-  beard?: string
-  occlusion?: string
-  face_lighting?: string
-  camera_angle?: string
-  network_artifact?: string
-
-  lip_jitter?: string
-  eye_blink_rate?: string
-  head_motion_lag?: string
-  phoneme_alignment?: string
-  jaw_motion_alignment?: string
-
-  audio_origin?: string
-  speaker?: number
-  rejected?: boolean
-}
-
-type VideoMetadata = {
+export type VideoMetadata = {
   polarity?: "real" | "fake"
   generation_tool?: string
   architecture?: string
-}
-// ---------------- UTILS ----------------
-function getLabelsForFrame(
-  frame: number,
-  keyframes: Record<number, Labels>
-): Labels {
-  const frames = Object.keys(keyframes)
-    .map(Number)
-    .filter(f => f <= frame)
-    .sort((a, b) => b - a)
-
-  for (const f of frames) {
-    const labels = keyframes[f]
-    if(!labels) continue
-
-    if (labels?.rejected) continue
-    return { ...labels }
-  }
-  
-  return {}
 }
 
 // ---------------- APP ----------------
@@ -100,6 +63,16 @@ export default function App() {
   function exportAnnotations() {
     if (!videoId) return
 
+    const issues = validateAnnotation(
+      { totalFrames, keyframes, VideoMetadata: metadata },
+      { strict: true }
+    )
+
+    if (issues.some(i => i.type === "error")) {
+      alert("Cannot export: fix validation errors first")
+      return
+    }
+
     const payload = {
       videoId,
       totalFrames,
@@ -118,6 +91,24 @@ export default function App() {
     a.click()
     URL.revokeObjectURL(url)
   }
+
+  // ---------------- EXPORT WARNINGS -----------------
+  const validationIssues = useMemo(
+  () =>
+    validateAnnotation(
+      {
+        totalFrames,
+        keyframes,
+        VideoMetadata: metadata,
+      },
+      { strict: false }
+    ),
+  [totalFrames, keyframes, metadata]
+)
+
+
+  const hasErrors = validationIssues.some(i => i.type === "error")
+
 
   // ---------------- LOAD SAVED VIDEO ----------------
   useEffect(() => {
@@ -149,19 +140,19 @@ export default function App() {
       })
   }, [videoId])
 
-  useEffect(() => {
-    if (!videoId) return
+  // useEffect(() => {
+  //   if (!videoId) return
 
-    const id = setTimeout(() => {
-      fetch(`${API}/video/${videoId}/annotations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ metadata }),
-      })
-    }, 600)
+  //   const id = setTimeout(() => {
+  //     fetch(`${API}/video/${videoId}/annotations`, {
+  //       method: "POST",
+  //       headers: { "Content-Type": "application/json" },
+  //       body: JSON.stringify({ metadata }),
+  //     })
+  //   }, 600)
 
-    return () => clearTimeout(id)
-  }, [metadata, videoId])
+  //   return () => clearTimeout(id)
+  // }, [metadata, videoId])
 
   
   // ---------------- DERIVED ----------------
@@ -169,6 +160,9 @@ export default function App() {
   const frameUrl = `${API}/video/${videoId}/frame/${currentFrame}`
   const isRejected = !!keyframes[currentFrame]?.rejected
   const locked = annotationStatus === "final"
+  const isFake = metadata.polarity === "fake"
+  const isReal = metadata.polarity === "real"
+
 
   const keyframeFrames = Object.keys(keyframes)
     .map(Number)
@@ -181,6 +175,18 @@ export default function App() {
   const nextKeyframe = keyframeFrames.find(f => f > currentFrame)
 
   // ---------------- AUTOSAVE ----------------
+
+  useEffect(() => {
+    if (isReal) {
+      setMetadata(m => ({
+        ...m,
+        generation_tool: undefined,
+        architecture: undefined,
+      }))
+    }
+  }, [isReal])
+
+
   useEffect(() => {
     if (!videoId || locked) return
 
@@ -188,13 +194,15 @@ export default function App() {
       fetch(`${API}/video/${videoId}/annotations`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyframes }),
+        body: JSON.stringify({
+          keyframes,
+          metadata,
+        }),
       })
     }, 600)
 
     return () => clearTimeout(id)
-  }, [keyframes, videoId, locked])
-
+  }, [keyframes, metadata, videoId, locked])
   
   // ---------------- UPLOAD INPUT ----------------
   const uploadInput = (
@@ -212,28 +220,70 @@ export default function App() {
   )
 
   // ---------------- PRE-UPLOAD UI ----------------
+  const appBackground = {
+    minHeight: "100vh",
+    background: "radial-gradient(circle at top, #121212, #0a0a0a)",
+    color: "#eaeaea",
+    fontFamily: "Inter, system-ui, sans-serif",
+  }
+  const primaryButton = {
+    background: "linear-gradient(135deg, #4caf50, #2e7d32)",
+    border: "none",
+    color: "#fff",
+    padding: "10px 18px",
+    borderRadius: 8,
+    cursor: "pointer",
+    fontWeight: 600,
+  }
+
+  const secondaryButton = {
+    background: "#1e1e1e",
+    border: "1px solid #333",
+    color: "#eee",
+    padding: "8px 14px",
+    borderRadius: 8,
+    cursor: "pointer",
+  }
+
+  const dangerButton = {
+    background: "#b71c1c",
+    border: "1px solid #ff5252",
+    color: "#fff",
+    padding: "8px 14px",
+    borderRadius: 8,
+  }
+
+  const labelCard = {
+    background: "#0f0f0f",
+    border: "1px solid #222",
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 10,
+  }
+
   if (!videoId) {
     return (
       <div
         style={{
+          ...appBackground,
           minHeight: "100vh",
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          fontFamily: "Inter, Arial, sans-serif",
         }}
       >
         {uploadInput}
-        <div style={{ textAlign: "center", width: 520 }}>
-          <h1 style={{ fontSize: 44, marginBottom: 6 }}>FLINT</h1>
+        <div style={{ width: 520, textAlign: "center", background: "#111", padding: "48px 40px", borderRadius: 16, border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 20px 60px rgba(0,0,0,0.6)", }}>
+          <h1 style={{ fontSize: 48, marginBottom: 4 }}>FLINT</h1>
           <p style={{ opacity: 0.7 }}>Frame Level Intelligent Tagging</p>
-          <p style={{ fontSize: 13, opacity: 0.6 }}>A ProjectKarna Tool</p>
+          <p style={{ fontSize: 13, opacity: 0.5 }}>A ProjectKarna Tool</p>
 
-          <button onClick={() => document.getElementById("video-upload")?.click()}>
+          <button style={primaryButton} 
+            onClick={() => document.getElementById("video-upload")?.click()}>
             Upload Video
           </button>
 
-          {isUploading && <p style={{ marginTop: 10 }}>Extracting frames…</p>}
+          {isUploading && <p style={{ marginTop: 12, opacity:0.7 }}>⏳Extracting frames…</p>}
         </div>
       </div>
     )
@@ -243,25 +293,31 @@ export default function App() {
   return (
     <div
       style={{
-        minHeight: "100vh",
+        ...appBackground,
         display: "flex",
         justifyContent: "center",
-        paddingTop: 20,
-        fontFamily: "Inter, Arial, sans-serif",
-        borderBottom: "1px solid rgba(255,255,255,0.1)",
-        paddingBottom: 12,
+        alignItems: "center"
       }}
     >
       {uploadInput}
 
-      <div style={{ width: 760 }}>
+      <div style={{
+        width: "100%",
+        maxWidth: "1600px",
+        margin: "0 auto",
+        padding: "0 24px",
+      }}>
         {/* HEADER BAR */}
           <div
             style={{
+              background: "#0f0f0f",
+              padding: "16px 10px",
+              borderRadius: 12,
+              border: "1px solid rgba(255,255,255,0.08)",
+              marginBottom: 5,
               display: "flex",
               justifyContent: "space-between",
               alignItems: "center",
-              marginBottom: 20,
             }}
           >
             {/* LEFT: LOGO / TITLE */}
@@ -300,67 +356,103 @@ export default function App() {
                 Upload New Video
               </button>
 
-              <button onClick={exportAnnotations}>
-                Export Keyframes
+              {/* {validationIssues.length > 0 && (
+                <div style={{
+                  background: "#1e1e1e",
+                  border: "1px solid #444",
+                  padding: 12,
+                  marginTop: 16
+                }}>
+                  <h4>Validation Issues</h4>
+                  <ul>
+                    {validationIssues.map((i, idx) => (
+                      <li key={idx} style={{ color: i.type === "error" ? "#f44336" : "#ff9800" }}>
+                        {i.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )} */}
+
+              <button
+                disabled={hasErrors}
+                onClick={exportAnnotations}
+                style={{
+                  opacity: hasErrors ? 0.5 : 1,
+                  cursor: hasErrors ? "not-allowed" : "pointer"
+                }}
+              >
+                Export Annotation
               </button>
+
             </div>
           </div>
 
-      <h4>Video Metadata</h4>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <select
-          value={metadata.polarity ?? ""}
-          onChange={e =>
-            setMetadata(m => ({ ...m, polarity: e.target.value as any }))
-          }
-        >
-          <option value="">Polarity</option>
-          <option value="real">Real</option>
-          <option value="fake">Fake</option>
-        </select>
+      
 
-        <select
-          value={metadata.generation_tool ?? ""}
-          onChange={e =>
-            setMetadata(m => ({ ...m, generation_tool: e.target.value }))
-          }
-        >
-          <option value="">Generation Tool</option>
-          <option value="deepfacelab">DeepFaceLab</option>
-          <option value="faceswap">FaceSwap</option>
-          <option value="veo">Veo</option>
-          <option value="other">Other</option>
-        </select>
-
-        <select
-          value={metadata.architecture ?? ""}
-          onChange={e =>
-            setMetadata(m => ({ ...m, architecture: e.target.value }))
-          }
-        >
-          <option value="">Architecture</option>
-          <option value="gan">GAN</option>
-          <option value="diffusion">Diffusion</option>
-          <option value="neural_rendering">Neural Rendering</option>
-          <option value="unknown">Unknown</option>
-        </select>
-      </div>
-
-
-        {/* FRAME VIEWER */}
+        {/* FRAME + NAV */}
         <div
           style={{
-            width: 640,
-            height: 360,
-            margin: "0 auto",
+            display: "grid",
+            gridTemplateColumns: "120px 1fr 120px",
+            gap: 12,
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+
+        {/* ZOOM */}
+        {/* <div style={{ textAlign: "center", marginTop: 8 }}>
+          <button onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}>−</button>
+          <span style={{ margin: "0 12px" }}>{zoom.toFixed(1)}x</span>
+          <button onClick={() => setZoom(z => Math.min(2.5, z + 0.1))}>+</button> */}
+          {/* {isRejected && (
+            <div style={{
+              position: "absolute",
+              top: 10,
+              right: 10,
+              background: "#b71c1c",
+              padding: "4px 10px",
+              borderRadius: 6,
+              fontSize: 12,
+            }}>
+              REJECTED
+            </div>
+          )} */}
+        {/* </div> */}
+
+        {/* NAV */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            alignItems: "stretch",
+          }}
+        >
+          <button onClick={() => setCurrentFrame(f => Math.max(1, f - 1))}>
+            ◀ Prev
+          </button>
+
+          <button onClick={() => setCurrentFrame(f => Math.max(1, f - 10))}>
+            -10
+          </button>
+
+          <button onClick={() => prevKeyframe && setCurrentFrame(prevKeyframe)}>
+            ⏮ Key
+          </button>
+        </div>
+        <div
+          style={{
+            height: 350,
             background: "#000",
-            border: "1px solid #888",
+            borderRadius: 14,
+            border: "1px solid #222",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            overflow: "hidden",
-            borderBottom: "1px solid rgba(255,255,255,0.1)",
-            paddingBottom: 12,
+            position: "sticky",
+            top: 16,
           }}
         >
           <img
@@ -374,61 +466,29 @@ export default function App() {
             }}
           />
         </div>
-
-        {/* ZOOM */}
-        <div style={{ textAlign: "center", marginTop: 8 }}>
-          <button onClick={() => setZoom(z => Math.max(0.5, z - 0.1))}>−</button>
-          <span style={{ margin: "0 12px" }}>{zoom.toFixed(1)}x</span>
-          <button onClick={() => setZoom(z => Math.min(2.5, z + 0.1))}>+</button>
-          {isRejected && (
-            <span style={{ color: "red", marginLeft: 12 }}>✖ Rejected</span>
-          )}
-        </div>
-
-        {/* NAV */}
-        <div style={{ textAlign: "center", marginTop: 10 }}>
-          <button
-            disabled={prevKeyframe === undefined}
-            onClick={() => prevKeyframe && setCurrentFrame(prevKeyframe)}
-          >
-            ⏮ Prev Keyframe
-          </button>
-
-          <button
-            disabled={currentFrame <= 10}
-            onClick={() => setCurrentFrame(f => f - 10)}
-          >
-            -10
-          </button>
-
-          <button
-            disabled={currentFrame === 1}
-            onClick={() => setCurrentFrame(f => f - 1)}
-          >
-            ◀ Prev
-          </button>
-
-          <button
-            disabled={currentFrame === totalFrames}
-            onClick={() => setCurrentFrame(f => f + 1)}
-          >
+        
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+            alignItems: "stretch",
+          }}
+        >
+          <button onClick={() => setCurrentFrame(f => Math.min(totalFrames, f + 1))}>
             Next ▶
           </button>
 
-          <button
-            disabled={currentFrame + 10 > totalFrames}
-            onClick={() => setCurrentFrame(f => f + 10)}
-          >
+          <button onClick={() => setCurrentFrame(f => Math.min(totalFrames, f + 10))}>
             +10
           </button>
 
-          <button
-            disabled={nextKeyframe === undefined}
-            onClick={() => nextKeyframe && setCurrentFrame(nextKeyframe)}
-          >
-            Next Keyframe ⏭
+          <button onClick={() => nextKeyframe && setCurrentFrame(nextKeyframe)}>
+            Key ⏭
           </button>
         </div>
+        </div>
+
 
         {locked && (
           <p style={{ color: "red", textAlign: "center", marginTop: 8 }}>
@@ -436,14 +496,14 @@ export default function App() {
           </p>
         )}
 
-        <p style={{ textAlign: "center" }}>
+        <p style={{ textAlign: "center", margin : 0}}>
           Frame <b>{currentFrame}</b> / {totalFrames}
           {keyframes[currentFrame] && (!isRejected) && (
             <span style={{ color: "green", marginLeft: 10 }}>● Keyframe</span>
           )}
         </p>
 
-        <div style={{ textAlign: "center", marginBottom: 8 }}>
+        <div style={{ textAlign: "center", marginBottom: 2 }}>
           <input
             type="number"
             min={1}
@@ -500,10 +560,28 @@ export default function App() {
             
         <hr />
 
-        {/* LABELS */}
+        {/* LABEL GROUP ROW */}
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            alignItems: "stretch",
+            marginTop: 12,
+          }}
+        >
+        <div style={ labelCard }>
         <h5 style={{ marginBottom : 6, marginTop: 10, opacity: 0.8, fontWeight: 500}}>Identity</h5>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <select
+
+        {/* <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}> */}
+
+        {/* <h5 style={{ marginBottom : 6, marginTop: 10, opacity: 0.8, fontWeight: 500}}>Identity</h5> */}
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.gender ?? ""}
             onChange={e =>
@@ -521,7 +599,13 @@ export default function App() {
             <option value="F">Female</option>
           </select>
 
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.ethnicity ?? ""}
             onChange={e =>
@@ -545,7 +629,13 @@ export default function App() {
             <option value="other">Other</option>
           </select>
 
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.age ?? ""}
             onChange={e =>
@@ -567,7 +657,13 @@ export default function App() {
             <option value="senior">Senior</option>
           </select>
 
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.skin_tone ?? ""}
             onChange={e =>
@@ -589,9 +685,15 @@ export default function App() {
             <option value="dark">Dark</option>
           </select>
         </div>
+        <div style={ labelCard}>
         <h5 style={{ marginBottom : 6, marginTop: 10, opacity: 0.8, fontWeight: 500}}>Visual</h5>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.beard ?? ""}
             onChange={e =>
@@ -611,7 +713,13 @@ export default function App() {
             <option value="heavy">Heavy</option>
           </select>
 
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.occlusion ?? ""}
             onChange={e =>
@@ -633,7 +741,13 @@ export default function App() {
             <option value="cap">Cap</option>
           </select>
           
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.face_lighting ?? ""}
             onChange={e =>
@@ -656,7 +770,13 @@ export default function App() {
             <option value="very-dim">Very Dim</option>
           </select>
           
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.camera_angle ?? ""}
             onChange={e =>
@@ -677,12 +797,18 @@ export default function App() {
             <option value="downwards">Downwards</option>
           </select>
 
-          <input
+          <input style={{
+            width:90,
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             type="number"
             placeholder="Speaker"
             value={currentLabels.speaker ?? "0"}
-            style={{ width: 90 }}
             onChange={e =>
               setKeyframes(prev => ({
                 ...prev,
@@ -698,9 +824,15 @@ export default function App() {
           />
         </div>
       
+      <div style={ labelCard }>
       <h5 style={{ marginBottom: 6, marginTop: 14, opacity: 0.8, fontWeight: 500 }}>Audio</h5>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.phoneme_alignment ?? ""}
             onChange={e =>
@@ -719,7 +851,13 @@ export default function App() {
             <option value="slight-mismatch">Slight Mismatch</option>
           </select>
           
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.jaw_motion_alignment ?? ""}
             onChange={e =>
@@ -738,7 +876,13 @@ export default function App() {
             <option value="slight-mismatch">Slight Mismatch</option>
           </select>
 
-          <select
+          <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+          }}
             disabled = {locked || isRejected}
             value={currentLabels.audio_origin ?? ""}
             onChange={e =>
@@ -756,10 +900,92 @@ export default function App() {
             <option value="synthetic">Synthetic</option>
           </select>
       </div>
+    </div>
+
+      {/* METADATA + REJECT */}
+      {/* <div style={{ marginTop: 16, marginBottom: 40 }}> */}
+      <h4 style={{ marginTop: 0, opacity: 0.85 }}>Video Metadata</h4>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", background: "#101010", border: "1px solid #222", borderRadius: 12, padding: 14, marginBottom: 16, }}>
+        <select style={{
+            background: "#111",
+            color: "#fff",
+            border: "1px solid #333",
+            padding: "6px 10px",
+            borderRadius: 6,
+        }}
+          value={metadata.polarity ?? ""}
+          onChange={e =>
+            setMetadata(m => ({ ...m, polarity: e.target.value as any }))
+          }
+        >
+          <option value="">Polarity</option>
+          <option value="real">Real</option>
+          <option value="fake">Fake</option>
+        </select>
+
+        <select
+          disabled = {!isFake}
+          value={metadata.generation_tool ?? ""}
+          onChange={e =>
+            setMetadata(m => ({ ...m, generation_tool: e.target.value || undefined }))
+          }
+        >
+          <option value="">Generation Tool</option>
+          <option value="deepfacelab">DeepFaceLab</option>
+          <option value="faceswap">FaceSwap</option>
+          <option value="veo">Veo</option>
+          <option value="other">Other</option>
+        </select>
+
+        <select
+          disabled = {!isFake}
+          value={metadata.architecture ?? ""}
+          onChange={e =>
+            setMetadata(m => ({ ...m, architecture: e.target.value || undefined }))
+          }
+        >
+          <option value="">Architecture</option>
+          <option value="gan">GAN</option>
+          <option value="diffusion">Diffusion</option>
+          <option value="neural_rendering">Neural Rendering</option>
+          <option value="unknown">Unknown</option>
+        </select>
+        {isFake && (
+          <span style={{
+            background: "#b71c1c",
+            padding: "2px 8px",
+            borderRadius: 6,
+            fontSize: 12,
+            marginLeft: 8,
+          }}>
+            FAKE VIDEO
+          </span>
+        )}
+
+        {isReal && (
+          <div style={{ fontSize: 12, opacity: 0.6 }}>
+            Generation details are not applicable for real videos
+          </div>
+        )}
+
+        {metadata.polarity === undefined && (
+          <div style={{ fontSize: 12, opacity: 0.6 }}>
+            Select polarity to enable generation details
+          </div>
+        )}
+
+      </div>
         {/* REJECT */}
-        <div style={{ marginTop: 12 }}>
+        <div style={{
+          marginTop: 16,
+          padding: 12,
+          borderRadius: 10,
+          background: isRejected ? "#2a0000" : "#111",
+          border: "1px solid #442",
+        }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <input
+              disabled = {locked}
               type="checkbox"
               checked={isRejected}
               onChange={e =>

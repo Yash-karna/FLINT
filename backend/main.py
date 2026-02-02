@@ -111,8 +111,9 @@ def get_annotations(video_id: str, db: Session = Depends(get_db)):
         return {"keyframes": {}, "metadata": {}}
 
     return {
-        "keyframes": ann.keyframes,
-        "metadata": ann.metadata or {}
+        "video_id": ann.video_id,
+        "keyframes": ann.keyframes or {},
+        "metadata": ann.meta or {}
     }
 
 @app.post("/video/{video_id}/annotations")
@@ -122,10 +123,19 @@ def save_annotations(
     db: Session = Depends(get_db)
 ):
     ann = db.query(Annotation).filter_by(video_id=video_id).first()
-    if not ann:
-        raise HTTPException(status_code=404, detail="Annotation not found")
 
-    # ---- KEYFRAMES (existing logic) ----
+    # 🔑 CREATE IF MISSING
+    if not ann:
+        ann = Annotation(
+            video_id=video_id,
+            keyframes={},
+            meta={}
+        )
+        db.add(ann)
+        db.commit()
+        db.refresh(ann)
+
+    # ---- KEYFRAMES ----
     if payload.keyframes:
         existing = ann.keyframes or {}
 
@@ -139,21 +149,22 @@ def save_annotations(
             if frame not in existing or existing[frame].get("rejected"):
                 existing[frame] = {}
 
-            for k, v in incoming.dict(exclude_unset=True).items():
+            for k, v in incoming.model_dump(exclude_unset=True).items():
                 if k == "rejected" and v is False:
                     continue
                 existing[frame][k] = v
 
         ann.keyframes = existing
 
-    # ---- METADATA (NEW) ----
-    if payload.metadata:
-        ann.metadata = {
-            **(ann.metadata or {}),
-            **payload.metadata.dict(exclude_unset=True)
+    # ---- METADATA ----
+    if payload.meta:
+        ann.meta = {
+            **(ann.meta or {}),
+            **payload.meta.model_dump(exclude_unset=True)
         }
 
     db.commit()
+
     return {"status": "saved"}
 
 @app.post("/video/{video_id}/annotations/status")
