@@ -299,20 +299,7 @@ Adjust for production domain.
 
 ---
 
-## Testing Checklist
-
-Before deployment verify:
-
-✅ video upload
-✅ frame navigation
-✅ label persistence after refresh
-✅ metadata save
-✅ inheritance logic
-✅ rejected frame behavior
-✅ backend restart recovery
-✅ S3 mode toggle
-
----
+#
 
 ## Future Extensions
 
