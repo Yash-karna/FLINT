@@ -838,7 +838,7 @@ export default function App() {
           />
         </div>
       
-      <div style={ labelCard }>
+      {/* <div style={ labelCard }>
       <h5 style={{ marginBottom: 6, marginTop: 14, opacity: 0.8, fontWeight: 500 }}>Audio</h5>
           <select style={{
             background: "#111",
@@ -913,7 +913,7 @@ export default function App() {
             <option value="real">Real</option>
             <option value="synthetic">Synthetic</option>
           </select>
-      </div>
+      </div> */}
     </div>
 
       {/* METADATA + REJECT */}
