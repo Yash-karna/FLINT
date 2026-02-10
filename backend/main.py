@@ -8,6 +8,8 @@ import shutil
 import cv2
 import json
 
+from storage import save_frame, FRAMES_DIR
+from storage import get_frame as storage_get_frame
 from database import SessionLocal,Base,engine
 from models import Video, Annotation
 from schemas import AnnotationPayload
@@ -41,7 +43,11 @@ def get_db():
         db.close()
 
 # ---------------- HELPERS ----------------
-def extract_frames(video_path: str, out_dir: str) -> int:
+
+def extract_frames(video_path: str, video_id: str) -> int:
+    out_dir = os.path.join(FRAMES_DIR, video_id)
+    os.makedirs(out_dir, exist_ok=True)
+
     cap = cv2.VideoCapture(video_path)
     count = 0
 
@@ -49,11 +55,17 @@ def extract_frames(video_path: str, out_dir: str) -> int:
         ret, frame = cap.read()
         if not ret:
             break
+
         count += 1
-        cv2.imwrite(os.path.join(out_dir, f"{count}.jpg"), frame)
+        frame_path = os.path.join(out_dir, f"{count}.jpg")
+
+        cv2.imwrite(frame_path, frame)
+
+        save_frame(video_id, count, frame_path)
 
     cap.release()
     return count
+
 
 # ---------------- ROUTES ----------------
 
@@ -70,7 +82,7 @@ def upload_video(
     with open(video_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    total_frames = extract_frames(video_path, video_dir)
+    total_frames = extract_frames(video_path, video_id)
 
     # Save DB records
     video = Video(
@@ -94,13 +106,15 @@ def upload_video(
 
 # ---------------- FRAME SERVING ----------------
 
+
 @app.get("/video/{video_id}/frame/{frame}")
 def get_frame(video_id: str, frame: int):
-    frame_path = os.path.join(FRAMES_DIR, video_id, f"{frame}.jpg")
-    if not os.path.exists(frame_path):
-        raise HTTPException(status_code=404, detail="Frame not found")
+    result = storage_get_frame(video_id, frame)
 
-    return FileResponse(frame_path)
+    if result is None:
+        raise HTTPException(404, "Frame not found")
+
+    return result
 
 # ---------------- ANNOTATIONS ----------------
 

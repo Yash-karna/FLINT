@@ -157,11 +157,25 @@ export default function App() {
   
   // ---------------- DERIVED ----------------
   const currentLabels = getLabelsForFrame(currentFrame, keyframes)
-  const frameUrl = `${API}/video/${videoId}/frame/${currentFrame}`
   const isRejected = !!keyframes[currentFrame]?.rejected
   const locked = annotationStatus === "final"
   const isFake = metadata.polarity === "fake"
   const isReal = metadata.polarity === "real"
+
+  const [frameUrl, setFrameUrl] = useState("")
+
+  useEffect(() => {
+    if (!videoId) return
+
+    fetch(`${API}/video/${videoId}/frame/${currentFrame}`)
+      .then(res => {
+        if (res.headers.get("content-type")?.includes("application/json")) {
+          return res.json().then(d => d.url)
+        }
+        return `${API}/video/${videoId}/frame/${currentFrame}`
+      })
+      .then(setFrameUrl)
+  }, [videoId, currentFrame])
 
 
   const keyframeFrames = Object.keys(keyframes)
